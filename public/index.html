@@ -296,14 +296,6 @@
 
           <details>
             <summary>Advanced options</summary>
-            <label for="searchPreset" style="margin-top: 0.75rem">
-              Search mode
-              <select id="searchPreset" name="searchPreset">
-                <option value="fast">Fast</option>
-                <option value="balanced" selected>Balanced</option>
-                <option value="deep">Deep</option>
-              </select>
-            </label>
             <div class="row" style="margin-top: 0.75rem">
               <label for="maxDepth">
                 Max depth
@@ -317,10 +309,10 @@
                    type="number"
                    min="1"
                    max="100"
-                   value="8"
-                 />
-               </label>
-             </div>
+                   value="15"
+                  />
+                </label>
+              </div>
             <div class="row" style="margin-top: 0.75rem">
               <label for="maxTracksPerAlbum">
                 Max tracks per album
@@ -330,10 +322,10 @@
                    type="number"
                    min="1"
                    max="50"
-                   value="12"
-                 />
-               </label>
-             </div>
+                   value="20"
+                  />
+                </label>
+              </div>
           </details>
 
           <button id="submit-btn" type="submit">Find connection</button>
@@ -354,29 +346,10 @@
       const targetArtistInput = document.getElementById('targetArtist');
       const sourceArtistDropdown = document.getElementById('sourceArtistDropdown');
       const targetArtistDropdown = document.getElementById('targetArtistDropdown');
-      const searchPresetSelect = document.getElementById('searchPreset');
-      const maxDepthInput = document.getElementById('maxDepth');
-      const maxAlbumsPerArtistInput = document.getElementById('maxAlbumsPerArtist');
-      const maxTracksPerAlbumInput = document.getElementById('maxTracksPerAlbum');
       const SEARCH_TIMEOUT_MS = 120000;
       let activeConnectionSearchController = null;
       let graph = null;
       let graphMode = 'path';
-      const SEARCH_PRESETS = {
-        fast: { maxDepth: 2, maxAlbumsPerArtist: 5, maxTracksPerAlbum: 8 },
-        balanced: { maxDepth: 3, maxAlbumsPerArtist: 8, maxTracksPerAlbum: 12 },
-        deep: { maxDepth: 4, maxAlbumsPerArtist: 12, maxTracksPerAlbum: 20 },
-      };
-
-      function applySearchPreset(presetKey) {
-        const preset = SEARCH_PRESETS[presetKey];
-        if (!preset || !maxDepthInput || !maxAlbumsPerArtistInput || !maxTracksPerAlbumInput) {
-          return;
-        }
-        maxDepthInput.value = String(preset.maxDepth);
-        maxAlbumsPerArtistInput.value = String(preset.maxAlbumsPerArtist);
-        maxTracksPerAlbumInput.value = String(preset.maxTracksPerAlbum);
-      }
 
       function escapeHtml(value) {
         return String(value)
@@ -858,12 +831,6 @@
 
       bindArtistSuggestions(sourceArtistInput, sourceArtistDropdown);
       bindArtistSuggestions(targetArtistInput, targetArtistDropdown);
-      if (searchPresetSelect) {
-        searchPresetSelect.addEventListener('change', () => {
-          applySearchPreset(searchPresetSelect.value);
-        });
-        applySearchPreset(searchPresetSelect.value);
-      }
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
