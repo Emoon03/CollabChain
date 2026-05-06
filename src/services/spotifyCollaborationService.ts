@@ -79,9 +79,8 @@ export interface SearchMetrics {
   edgesExplored: number;
   graphDensity: number;
   averageNodeDegree: number;
+  pathEdgeUtilization: number;
   frontierLayersExpanded: number;
-  depthFromSource: number;
-  depthFromTarget: number;
 }
 
 export interface CollaborationAnalytics {
@@ -398,9 +397,8 @@ function buildAnalytics(params: {
   visitedFromSource: Set<string>;
   visitedFromTarget: Set<string>;
   exploredEdgeKeys: Set<string>;
+  pathLength: number;
   frontierLayersExpanded: number;
-  depthFromSource: number;
-  depthFromTarget: number;
 }): CollaborationAnalytics {
   const exploredArtistIds = new Set<string>([...params.visitedFromSource, ...params.visitedFromTarget]);
   const nodesExplored = exploredArtistIds.size;
@@ -408,6 +406,7 @@ function buildAnalytics(params: {
   const graphDensity =
     nodesExplored > 1 ? Number(((2 * edgesExplored) / (nodesExplored * (nodesExplored - 1))).toFixed(3)) : 0;
   const averageNodeDegree = nodesExplored > 0 ? Number(((2 * edgesExplored) / nodesExplored).toFixed(3)) : 0;
+  const pathEdgeUtilization = edgesExplored > 0 ? Number((params.pathLength / edgesExplored).toFixed(3)) : 0;
 
   return {
     searchMetrics: {
@@ -415,9 +414,8 @@ function buildAnalytics(params: {
       edgesExplored,
       graphDensity,
       averageNodeDegree,
+      pathEdgeUtilization,
       frontierLayersExpanded: params.frontierLayersExpanded,
-      depthFromSource: params.depthFromSource,
-      depthFromTarget: params.depthFromTarget,
     },
   };
 }
@@ -583,9 +581,8 @@ export async function findCollaborationPath(
         visitedFromSource,
         visitedFromTarget,
         exploredEdgeKeys,
+        pathLength: 0,
         frontierLayersExpanded,
-        depthFromSource: 0,
-        depthFromTarget: 0,
       }),
       exploredGraph: buildExploredGraph({
         sourceArtist,
@@ -675,9 +672,8 @@ export async function findCollaborationPath(
               visitedFromSource,
               visitedFromTarget,
               exploredEdgeKeys,
+              pathLength: baseResult.distance,
               frontierLayersExpanded,
-              depthFromSource,
-              depthFromTarget,
             }),
             exploredGraph: buildExploredGraph({
               sourceArtist,
