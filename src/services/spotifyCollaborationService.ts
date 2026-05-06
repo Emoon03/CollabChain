@@ -74,18 +74,42 @@ export interface CollaborationPathEdge {
   };
 }
 
+export interface SearchMetrics {
+  runtimeMs: number;
+  spotifyApiCalls: number;
+  nodesExplored: number;
+  edgesExplored: number;
+  frontierLayersExpanded: number;
+  depthFromSource: number;
+  depthFromTarget: number;
+}
+
+export interface DegreeCentralityMetric {
+  artist: CollaborationPathNode;
+  degree: number;
+  centrality: number;
+}
+
+export interface CollaborationAnalytics {
+  searchMetrics: SearchMetrics;
+  topConnectedArtists: DegreeCentralityMetric[];
+}
+
 export interface CollaborationPathResult {
   source: CollaborationPathNode;
   target: CollaborationPathNode;
   distance: number;
   path: CollaborationPathNode[];
   collaborations: CollaborationPathEdge[];
+  analytics: CollaborationAnalytics;
 }
 
 export interface ArtistSuggestion {
   id: string;
   name: string;
 }
+
+type CollaborationPathCoreResult = Omit<CollaborationPathResult, 'analytics'>;
 
 interface ParentStep {
   previousArtistId: string;
@@ -95,6 +119,10 @@ interface ParentStep {
 interface AccessTokenCache {
   accessToken: string;
   expiresAtMs: number;
+}
+
+interface SearchTelemetry {
+  spotifyApiCalls: number;
 }
 
 const DEFAULT_SEARCH_OPTIONS: CollaborationSearchOptions = {
@@ -150,7 +178,7 @@ function getSpotifyCredentials(): { clientId: string; clientSecret: string } {
   return { clientId, clientSecret };
 }
 
-async function getSpotifyAccessToken(): Promise<string> {
+async function getSpotifyAccessToken(telemetry?: SearchTelemetry): Promise<string> {
   if (tokenCache && Date.now() < tokenCache.expiresAtMs - TOKEN_EXPIRY_BUFFER_MS) {
     return tokenCache.accessToken;
   }
@@ -158,6 +186,7 @@ async function getSpotifyAccessToken(): Promise<string> {
   const { clientId, clientSecret } = getSpotifyCredentials();
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
+  telemetry && (telemetry.spotifyApiCalls += 1);
   const response = await fetch(`${SPOTIFY_ACCOUNTS_BASE_URL}/api/token`, {
     method: 'POST',
     headers: {
@@ -191,10 +220,11 @@ function toSpotifyApiPath(urlOrPath: string): string {
   return urlOrPath;
 }
 
-async function spotifyGet<T>(pathOrUrl: string, accessToken: string): Promise<T> {
+async function spotifyGet<T>(pathOrUrl: string, accessToken: string, telemetry?: SearchTelemetry): Promise<T> {
   const path = toSpotifyApiPath(pathOrUrl);
   for (let attempt = 0; attempt < SPOTIFY_RATE_LIMIT_MAX_ATTEMPTS; attempt += 1) {
     await waitForRequestSlot();
+    telemetry && (telemetry.spotifyApiCalls += 1);
     const response = await fetch(`${SPOTIFY_API_BASE_URL}${path}`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -221,14 +251,14 @@ async function spotifyGet<T>(pathOrUrl: string, accessToken: string): Promise<T>
   throw new Error(`Spotify API failed (429) for ${path}: Too many requests`);
 }
 
-async function searchArtistByName(name: string, accessToken: string): Promise<SpotifyArtist> {
+async function searchArtistByName(name: string, accessToken: string, telemetry?: SearchTelemetry): Promise<SpotifyArtist> {
   const query = new URLSearchParams({
     q: name,
     type: 'artist',
     limit: '10',
   });
 
-  const data = await spotifyGet<SpotifyArtistSearchResponse>(`/search?${query.toString()}`, accessToken);
+  const data = await spotifyGet<SpotifyArtistSearchResponse>(`/search?${query.toString()}`, accessToken, telemetry);
   if (data.artists.items.length === 0) {
     throw new Error(`No Spotify artist found for "${name}"`);
   }
@@ -260,13 +290,18 @@ export async function searchArtistsByQuery(queryText: string, maxResults = 8): P
   }));
 }
 
-async function getArtistAlbums(artistId: string, maxAlbums: number, accessToken: string): Promise<string[]> {
+async function getArtistAlbums(
+  artistId: string,
+  maxAlbums: number,
+  accessToken: string,
+  telemetry?: SearchTelemetry
+): Promise<string[]> {
   const albumIds = new Set<string>();
   const firstPageLimit = Math.min(maxAlbums, ARTIST_ALBUMS_PAGE_LIMIT);
   let nextPath: string | null = `/artists/${artistId}/albums?include_groups=album,single,appears_on,compilation&limit=${firstPageLimit}&offset=0`;
 
   while (nextPath && albumIds.size < maxAlbums) {
-    const page: SpotifyArtistAlbumsResponse = await spotifyGet<SpotifyArtistAlbumsResponse>(nextPath, accessToken);
+    const page: SpotifyArtistAlbumsResponse = await spotifyGet<SpotifyArtistAlbumsResponse>(nextPath, accessToken, telemetry);
     for (const album of page.items) {
       albumIds.add(album.id);
       if (albumIds.size >= maxAlbums) {
@@ -279,13 +314,18 @@ async function getArtistAlbums(artistId: string, maxAlbums: number, accessToken:
   return Array.from(albumIds);
 }
 
-async function getAlbumTracks(albumId: string, maxTracks: number, accessToken: string): Promise<SpotifyTrack[]> {
+async function getAlbumTracks(
+  albumId: string,
+  maxTracks: number,
+  accessToken: string,
+  telemetry?: SearchTelemetry
+): Promise<SpotifyTrack[]> {
   const tracks: SpotifyTrack[] = [];
   const firstPageLimit = Math.min(maxTracks, ALBUM_TRACKS_PAGE_LIMIT);
   let nextPath: string | null = `/albums/${albumId}/tracks?limit=${firstPageLimit}&offset=0`;
 
   while (nextPath && tracks.length < maxTracks) {
-    const page: SpotifyAlbumTracksResponse = await spotifyGet<SpotifyAlbumTracksResponse>(nextPath, accessToken);
+    const page: SpotifyAlbumTracksResponse = await spotifyGet<SpotifyAlbumTracksResponse>(nextPath, accessToken, telemetry);
     for (const track of page.items) {
       tracks.push(track);
       if (tracks.length >= maxTracks) {
@@ -302,13 +342,14 @@ async function getCollaborationsForArtist(
   artistId: string,
   options: CollaborationSearchOptions,
   accessToken: string,
-  artistNameById: Map<string, string>
+  artistNameById: Map<string, string>,
+  telemetry?: SearchTelemetry
 ): Promise<CollaborationEdge[]> {
-  const albums = await getArtistAlbums(artistId, options.maxAlbumsPerArtist, accessToken);
+  const albums = await getArtistAlbums(artistId, options.maxAlbumsPerArtist, accessToken, telemetry);
   const edgesByCollaborator = new Map<string, CollaborationEdge>();
 
   for (const albumId of albums) {
-    const tracks = await getAlbumTracks(albumId, options.maxTracksPerAlbum, accessToken);
+    const tracks = await getAlbumTracks(albumId, options.maxTracksPerAlbum, accessToken, telemetry);
     for (const track of tracks) {
       if (!track.artists.some((artist) => artist.id === artistId) || track.artists.length < 2) {
         continue;
@@ -350,6 +391,73 @@ function sanitizeOptions(rawOptions?: Partial<CollaborationSearchOptions>): Coll
   };
 }
 
+function createUndirectedEdgeKey(artistA: string, artistB: string): string {
+  return artistA < artistB ? `${artistA}::${artistB}` : `${artistB}::${artistA}`;
+}
+
+function buildDegreeCentrality(
+  adjacencyByArtist: Map<string, Set<string>>,
+  artistNameById: Map<string, string>,
+  maxArtists = 5
+): DegreeCentralityMetric[] {
+  const artistCount = adjacencyByArtist.size;
+  return Array.from(adjacencyByArtist.entries())
+    .map(([artistId, neighbors]) => {
+      const degree = neighbors.size;
+      const centrality = artistCount > 1 ? degree / (artistCount - 1) : 0;
+      return {
+        artist: { id: artistId, name: artistNameById.get(artistId) ?? artistId },
+        degree,
+        centrality: Number(centrality.toFixed(3)),
+      };
+    })
+    .sort((left, right) => {
+      if (right.degree !== left.degree) {
+        return right.degree - left.degree;
+      }
+      return left.artist.name.localeCompare(right.artist.name);
+    })
+    .slice(0, maxArtists);
+}
+
+function buildAnalytics(params: {
+  startedAtMs: number;
+  telemetry: SearchTelemetry;
+  visitedFromSource: Set<string>;
+  visitedFromTarget: Set<string>;
+  exploredEdgeKeys: Set<string>;
+  adjacencyByArtist: Map<string, Set<string>>;
+  artistNameById: Map<string, string>;
+  frontierLayersExpanded: number;
+  depthFromSource: number;
+  depthFromTarget: number;
+}): CollaborationAnalytics {
+  const exploredArtistIds = new Set<string>([
+    ...params.visitedFromSource,
+    ...params.visitedFromTarget,
+    ...params.adjacencyByArtist.keys(),
+  ]);
+
+  for (const artistId of exploredArtistIds) {
+    if (!params.adjacencyByArtist.has(artistId)) {
+      params.adjacencyByArtist.set(artistId, new Set<string>());
+    }
+  }
+
+  return {
+    searchMetrics: {
+      runtimeMs: Date.now() - params.startedAtMs,
+      spotifyApiCalls: params.telemetry.spotifyApiCalls,
+      nodesExplored: exploredArtistIds.size,
+      edgesExplored: params.exploredEdgeKeys.size,
+      frontierLayersExpanded: params.frontierLayersExpanded,
+      depthFromSource: params.depthFromSource,
+      depthFromTarget: params.depthFromTarget,
+    },
+    topConnectedArtists: buildDegreeCentrality(params.adjacencyByArtist, params.artistNameById),
+  };
+}
+
 function buildPathResult(
   meetingArtistId: string,
   sourceArtist: SpotifyArtist,
@@ -357,7 +465,7 @@ function buildPathResult(
   parentsFromSource: Map<string, ParentStep>,
   parentsFromTarget: Map<string, ParentStep>,
   artistNameById: Map<string, string>
-): CollaborationPathResult {
+): CollaborationPathCoreResult {
   const leftPath: string[] = [meetingArtistId];
   while (parentsFromSource.has(leftPath[0])) {
     const step = parentsFromSource.get(leftPath[0]);
@@ -429,6 +537,10 @@ export async function findCollaborationPath(
   targetArtistName: string,
   rawOptions?: Partial<CollaborationSearchOptions>
 ): Promise<CollaborationPathResult | null> {
+  const searchStartedAtMs = Date.now();
+  const telemetry: SearchTelemetry = {
+    spotifyApiCalls: 0,
+  };
   const sourceName = sourceArtistName.trim();
   const targetName = targetArtistName.trim();
 
@@ -437,14 +549,33 @@ export async function findCollaborationPath(
   }
 
   const options = sanitizeOptions(rawOptions);
-  const accessToken = await getSpotifyAccessToken();
-  const sourceArtist = await searchArtistByName(sourceName, accessToken);
-  const targetArtist = await searchArtistByName(targetName, accessToken);
+  const accessToken = await getSpotifyAccessToken(telemetry);
+  const sourceArtist = await searchArtistByName(sourceName, accessToken, telemetry);
+  const targetArtist = await searchArtistByName(targetName, accessToken, telemetry);
 
   const artistNameById = new Map<string, string>([
     [sourceArtist.id, sourceArtist.name],
     [targetArtist.id, targetArtist.name],
   ]);
+
+  const exploredEdgeKeys = new Set<string>();
+  const adjacencyByArtist = new Map<string, Set<string>>();
+  let frontierLayersExpanded = 0;
+
+  const recordExploredEdge = (artistA: string, artistB: string): void => {
+    if (artistA === artistB) {
+      return;
+    }
+    exploredEdgeKeys.add(createUndirectedEdgeKey(artistA, artistB));
+    if (!adjacencyByArtist.has(artistA)) {
+      adjacencyByArtist.set(artistA, new Set<string>());
+    }
+    if (!adjacencyByArtist.has(artistB)) {
+      adjacencyByArtist.set(artistB, new Set<string>());
+    }
+    adjacencyByArtist.get(artistA)?.add(artistB);
+    adjacencyByArtist.get(artistB)?.add(artistA);
+  };
 
   if (sourceArtist.id === targetArtist.id) {
     return {
@@ -453,6 +584,18 @@ export async function findCollaborationPath(
       distance: 0,
       path: [{ id: sourceArtist.id, name: sourceArtist.name }],
       collaborations: [],
+      analytics: buildAnalytics({
+        startedAtMs: searchStartedAtMs,
+        telemetry,
+        visitedFromSource: new Set<string>([sourceArtist.id]),
+        visitedFromTarget: new Set<string>([targetArtist.id]),
+        exploredEdgeKeys,
+        adjacencyByArtist,
+        artistNameById,
+        frontierLayersExpanded,
+        depthFromSource: 0,
+        depthFromTarget: 0,
+      }),
     };
   }
 
@@ -462,7 +605,7 @@ export async function findCollaborationPath(
     if (cached) {
       return cached;
     }
-    const edges = await getCollaborationsForArtist(artistId, options, accessToken, artistNameById);
+    const edges = await getCollaborationsForArtist(artistId, options, accessToken, artistNameById, telemetry);
     cache.set(artistId, edges);
     return edges;
   };
@@ -480,12 +623,14 @@ export async function findCollaborationPath(
     const expandFromSource = frontierFromSource.size <= frontierFromTarget.size;
     const currentFrontier = expandFromSource ? frontierFromSource : frontierFromTarget;
     const nextFrontier = new Set<string>();
+    frontierLayersExpanded += 1;
 
     for (const artistId of currentFrontier) {
       const neighbors = await getNeighbors(artistId);
 
       for (const edge of neighbors) {
         const neighborId = edge.toArtistId;
+        recordExploredEdge(artistId, neighborId);
         const currentVisited = expandFromSource ? visitedFromSource : visitedFromTarget;
         if (currentVisited.has(neighborId)) {
           continue;
@@ -513,7 +658,7 @@ export async function findCollaborationPath(
 
         const oppositeVisited = expandFromSource ? visitedFromTarget : visitedFromSource;
         if (oppositeVisited.has(neighborId)) {
-          return buildPathResult(
+          const baseResult = buildPathResult(
             neighborId,
             sourceArtist,
             targetArtist,
@@ -521,6 +666,21 @@ export async function findCollaborationPath(
             parentsFromTarget,
             artistNameById
           );
+          return {
+            ...baseResult,
+            analytics: buildAnalytics({
+              startedAtMs: searchStartedAtMs,
+              telemetry,
+              visitedFromSource,
+              visitedFromTarget,
+              exploredEdgeKeys,
+              adjacencyByArtist,
+              artistNameById,
+              frontierLayersExpanded,
+              depthFromSource,
+              depthFromTarget,
+            }),
+          };
         }
       }
     }

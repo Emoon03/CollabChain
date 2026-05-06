@@ -155,6 +155,35 @@
         border-radius: 10px;
         padding: 0.65rem;
       }
+      .analytics-grid {
+        display: grid;
+        gap: 0.6rem;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .analytics-card {
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        padding: 0.6rem;
+      }
+      .analytics-label {
+        color: #93c5fd;
+        font-size: 0.78rem;
+      }
+      .analytics-value {
+        margin-top: 0.2rem;
+        font-weight: 700;
+      }
+      .top-connected-list {
+        display: grid;
+        gap: 0.45rem;
+      }
+      .top-connected-item {
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        padding: 0.55rem 0.65rem;
+      }
       .graph-canvas {
         margin-top: 0.35rem;
         width: 100%;
@@ -217,6 +246,9 @@
           grid-template-columns: 1fr;
         }
         .summary-grid {
+          grid-template-columns: 1fr;
+        }
+        .analytics-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -507,6 +539,8 @@
       }
 
       function renderResult(data) {
+        const metrics = data.analytics?.searchMetrics;
+        const topConnectedArtists = Array.isArray(data.analytics?.topConnectedArtists) ? data.analytics.topConnectedArtists : [];
         const pathHtml = data.path
           .map(
             (node, index) =>
@@ -529,6 +563,54 @@
               )
               .join('')
           : '<div class="muted">No collaboration edges returned.</div>';
+        const analyticsHtml = metrics
+          ? `
+            <h2 class="section-title">Search analytics</h2>
+            <section class="analytics-grid">
+              <article class="analytics-card">
+                <div class="analytics-label">Runtime</div>
+                <div class="analytics-value">${escapeHtml(metrics.runtimeMs)} ms</div>
+              </article>
+              <article class="analytics-card">
+                <div class="analytics-label">Spotify API calls</div>
+                <div class="analytics-value">${escapeHtml(metrics.spotifyApiCalls)}</div>
+              </article>
+              <article class="analytics-card">
+                <div class="analytics-label">Nodes explored</div>
+                <div class="analytics-value">${escapeHtml(metrics.nodesExplored)}</div>
+              </article>
+              <article class="analytics-card">
+                <div class="analytics-label">Edges explored</div>
+                <div class="analytics-value">${escapeHtml(metrics.edgesExplored)}</div>
+              </article>
+              <article class="analytics-card">
+                <div class="analytics-label">Frontier layers expanded</div>
+                <div class="analytics-value">${escapeHtml(metrics.frontierLayersExpanded)}</div>
+              </article>
+              <article class="analytics-card">
+                <div class="analytics-label">Depth reached (source/target)</div>
+                <div class="analytics-value">${escapeHtml(metrics.depthFromSource)} / ${escapeHtml(metrics.depthFromTarget)}</div>
+              </article>
+            </section>
+          `
+          : '';
+        const topConnectedHtml = topConnectedArtists.length
+          ? `
+            <h2 class="section-title">Most connected artists (degree centrality)</h2>
+            <section class="top-connected-list">
+              ${topConnectedArtists
+                .map(
+                  (item, index) => `
+                    <article class="top-connected-item">
+                      <div><strong>#${index + 1}</strong> ${escapeHtml(item.artist.name)}</div>
+                      <div class="muted">Degree: ${escapeHtml(item.degree)} | Centrality: ${escapeHtml(item.centrality)}</div>
+                    </article>
+                  `
+                )
+                .join('')}
+            </section>
+          `
+          : '';
 
         resultEl.innerHTML = `
           <section class="summary-grid">
@@ -549,6 +631,8 @@
           <div class="path-flow">${pathHtml}</div>
           <h2 class="section-title">Graph visualization</h2>
           <div id="graph" class="graph-canvas"></div>
+          ${analyticsHtml}
+          ${topConnectedHtml}
           <h2 class="section-title">Collaborations</h2>
           <section class="collab-list">${collaborations}</section>
         `;

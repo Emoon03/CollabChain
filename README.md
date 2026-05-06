@@ -19,6 +19,7 @@ Find collaboration connections between two artists using Spotify data.
 
 - Open `http://localhost:3001` in your browser.
 - Enter source and target artist names (with dropdown suggestions), then click **Find connection**.
+- Results now include graph analytics (search runtime, explored nodes/edges, API calls, and top connected artists by degree centrality on the explored subgraph).
 
 ## Endpoints
 
