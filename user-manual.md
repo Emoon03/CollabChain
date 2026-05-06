@@ -17,7 +17,7 @@ The web app also includes graph visualization and search analytics for the explo
 2. Log in and create a new app.
 3. Copy your **Client ID** and **Client Secret**.
 
-![Screenshot 2 - Spotify Developer Dashboard](screenshots/02-spotify-dashboard.png)
+![Screenshot 2 - Spotify Developer Dashboard](screenshots/02-spotify-dashboard.png)![Screenshot 3 - Spotify Developer Key](screenshots/03-spotify-key.png)
 
 ## 3. Project Setup
 From the project root:
