@@ -174,16 +174,6 @@
         margin-top: 0.2rem;
         font-weight: 700;
       }
-      .top-connected-list {
-        display: grid;
-        gap: 0.45rem;
-      }
-      .top-connected-item {
-        background: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 10px;
-        padding: 0.55rem 0.65rem;
-      }
       .graph-canvas {
         margin-top: 0.35rem;
         width: 100%;
@@ -540,7 +530,6 @@
 
       function renderResult(data) {
         const metrics = data.analytics?.searchMetrics;
-        const topConnectedArtists = Array.isArray(data.analytics?.topConnectedArtists) ? data.analytics.topConnectedArtists : [];
         const pathHtml = data.path
           .map(
             (node, index) =>
@@ -594,23 +583,6 @@
             </section>
           `
           : '';
-        const topConnectedHtml = topConnectedArtists.length
-          ? `
-            <h2 class="section-title">Most connected artists (degree centrality)</h2>
-            <section class="top-connected-list">
-              ${topConnectedArtists
-                .map(
-                  (item, index) => `
-                    <article class="top-connected-item">
-                      <div><strong>#${index + 1}</strong> ${escapeHtml(item.artist.name)}</div>
-                      <div class="muted">Degree: ${escapeHtml(item.degree)} | Centrality: ${escapeHtml(item.centrality)}</div>
-                    </article>
-                  `
-                )
-                .join('')}
-            </section>
-          `
-          : '';
 
         resultEl.innerHTML = `
           <section class="summary-grid">
@@ -632,7 +604,6 @@
           <h2 class="section-title">Graph visualization</h2>
           <div id="graph" class="graph-canvas"></div>
           ${analyticsHtml}
-          ${topConnectedHtml}
           <h2 class="section-title">Collaborations</h2>
           <section class="collab-list">${collaborations}</section>
         `;

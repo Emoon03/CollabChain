@@ -84,15 +84,8 @@ export interface SearchMetrics {
   depthFromTarget: number;
 }
 
-export interface DegreeCentralityMetric {
-  artist: CollaborationPathNode;
-  degree: number;
-  centrality: number;
-}
-
 export interface CollaborationAnalytics {
   searchMetrics: SearchMetrics;
-  topConnectedArtists: DegreeCentralityMetric[];
 }
 
 export interface CollaborationPathResult {
@@ -395,54 +388,17 @@ function createUndirectedEdgeKey(artistA: string, artistB: string): string {
   return artistA < artistB ? `${artistA}::${artistB}` : `${artistB}::${artistA}`;
 }
 
-function buildDegreeCentrality(
-  adjacencyByArtist: Map<string, Set<string>>,
-  artistNameById: Map<string, string>,
-  maxArtists = 5
-): DegreeCentralityMetric[] {
-  const artistCount = adjacencyByArtist.size;
-  return Array.from(adjacencyByArtist.entries())
-    .map(([artistId, neighbors]) => {
-      const degree = neighbors.size;
-      const centrality = artistCount > 1 ? degree / (artistCount - 1) : 0;
-      return {
-        artist: { id: artistId, name: artistNameById.get(artistId) ?? artistId },
-        degree,
-        centrality: Number(centrality.toFixed(3)),
-      };
-    })
-    .sort((left, right) => {
-      if (right.degree !== left.degree) {
-        return right.degree - left.degree;
-      }
-      return left.artist.name.localeCompare(right.artist.name);
-    })
-    .slice(0, maxArtists);
-}
-
 function buildAnalytics(params: {
   startedAtMs: number;
   telemetry: SearchTelemetry;
   visitedFromSource: Set<string>;
   visitedFromTarget: Set<string>;
   exploredEdgeKeys: Set<string>;
-  adjacencyByArtist: Map<string, Set<string>>;
-  artistNameById: Map<string, string>;
   frontierLayersExpanded: number;
   depthFromSource: number;
   depthFromTarget: number;
 }): CollaborationAnalytics {
-  const exploredArtistIds = new Set<string>([
-    ...params.visitedFromSource,
-    ...params.visitedFromTarget,
-    ...params.adjacencyByArtist.keys(),
-  ]);
-
-  for (const artistId of exploredArtistIds) {
-    if (!params.adjacencyByArtist.has(artistId)) {
-      params.adjacencyByArtist.set(artistId, new Set<string>());
-    }
-  }
+  const exploredArtistIds = new Set<string>([...params.visitedFromSource, ...params.visitedFromTarget]);
 
   return {
     searchMetrics: {
@@ -454,7 +410,6 @@ function buildAnalytics(params: {
       depthFromSource: params.depthFromSource,
       depthFromTarget: params.depthFromTarget,
     },
-    topConnectedArtists: buildDegreeCentrality(params.adjacencyByArtist, params.artistNameById),
   };
 }
 
@@ -559,23 +514,7 @@ export async function findCollaborationPath(
   ]);
 
   const exploredEdgeKeys = new Set<string>();
-  const adjacencyByArtist = new Map<string, Set<string>>();
   let frontierLayersExpanded = 0;
-
-  const recordExploredEdge = (artistA: string, artistB: string): void => {
-    if (artistA === artistB) {
-      return;
-    }
-    exploredEdgeKeys.add(createUndirectedEdgeKey(artistA, artistB));
-    if (!adjacencyByArtist.has(artistA)) {
-      adjacencyByArtist.set(artistA, new Set<string>());
-    }
-    if (!adjacencyByArtist.has(artistB)) {
-      adjacencyByArtist.set(artistB, new Set<string>());
-    }
-    adjacencyByArtist.get(artistA)?.add(artistB);
-    adjacencyByArtist.get(artistB)?.add(artistA);
-  };
 
   if (sourceArtist.id === targetArtist.id) {
     return {
@@ -590,8 +529,6 @@ export async function findCollaborationPath(
         visitedFromSource: new Set<string>([sourceArtist.id]),
         visitedFromTarget: new Set<string>([targetArtist.id]),
         exploredEdgeKeys,
-        adjacencyByArtist,
-        artistNameById,
         frontierLayersExpanded,
         depthFromSource: 0,
         depthFromTarget: 0,
@@ -630,7 +567,9 @@ export async function findCollaborationPath(
 
       for (const edge of neighbors) {
         const neighborId = edge.toArtistId;
-        recordExploredEdge(artistId, neighborId);
+        if (artistId !== neighborId) {
+          exploredEdgeKeys.add(createUndirectedEdgeKey(artistId, neighborId));
+        }
         const currentVisited = expandFromSource ? visitedFromSource : visitedFromTarget;
         if (currentVisited.has(neighborId)) {
           continue;
@@ -674,8 +613,6 @@ export async function findCollaborationPath(
               visitedFromSource,
               visitedFromTarget,
               exploredEdgeKeys,
-              adjacencyByArtist,
-              artistNameById,
               frontierLayersExpanded,
               depthFromSource,
               depthFromTarget,
