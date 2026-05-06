@@ -82,12 +82,12 @@ After a successful search, the page shows:
 - **Full explored graph**: shows the BFS explored subgraph
 
 ### D) Search analytics
-- Graph density
-- Average node degree
-- Nodes explored
-- Edges explored
-- Frontier layers expanded
-- Bidirectional balance score
+- **Graph density**: How connected the explored graph is overall (higher means more possible artist-to-artist links are present).
+- **Average node degree**: Average number of collaboration links per explored artist.
+- **Nodes explored**: Total number of artists visited during the search.
+- **Edges explored**: Total number of collaboration links examined during the search.
+- **Frontier layers expanded**: Number of BFS expansion rounds performed.
+- **Bidirectional balance score**: How evenly the source-side and target-side BFS searches shared the work (closer to 1 is more balanced).
 
 ### E) Collaborations
 - Step-by-step track/artist pair used for each edge in the returned path
@@ -108,12 +108,5 @@ After a successful search, the page shows:
   Check `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in `.env`.
 - **Timeout / no result**
   Increase search limits or try a different artist pair.
-- **App not updating after code changes**
-  Restart the server and hard refresh browser (`Cmd+Shift+R` on macOS).
 - **Port conflict**
   Change `PORT` in `.env` and restart.
-
-## 9. Optional API Endpoints
-- `GET /api/health`
-- `GET /api/music/artists/search?q=<artist name>`
-- `POST /api/music/connections`
