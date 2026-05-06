@@ -174,6 +174,31 @@
         margin-top: 0.2rem;
         font-weight: 700;
       }
+      .graph-mode-controls {
+        display: inline-flex;
+        gap: 0.45rem;
+        margin-top: 0.25rem;
+        margin-bottom: 0.35rem;
+      }
+      .graph-mode-btn {
+        background: #0f172a;
+        border: 1px solid #334155;
+        color: #cbd5e1;
+        border-radius: 999px;
+        padding: 0.35rem 0.75rem;
+        font-size: 0.82rem;
+        cursor: pointer;
+      }
+      .graph-mode-btn.active {
+        background: #10b981;
+        color: #052e2b;
+        border-color: #10b981;
+        font-weight: 700;
+      }
+      .graph-mode-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
       .graph-canvas {
         margin-top: 0.35rem;
         width: 100%;
@@ -336,6 +361,7 @@
       const SEARCH_TIMEOUT_MS = 120000;
       let activeConnectionSearchController = null;
       let graph = null;
+      let graphMode = 'path';
       const SEARCH_PRESETS = {
         fast: { maxDepth: 2, maxAlbumsPerArtist: 5, maxTracksPerAlbum: 8 },
         balanced: { maxDepth: 3, maxAlbumsPerArtist: 8, maxTracksPerAlbum: 12 },
@@ -369,7 +395,7 @@
         resultEl.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
       }
 
-      function getGraphElements(data) {
+      function getPathGraphElements(data) {
         const pathItems = Array.isArray(data.path) ? data.path : [];
         const collabItems = Array.isArray(data.collaborations) ? data.collaborations : [];
         const nodesById = new Map();
@@ -425,6 +451,48 @@
         return { nodes, edges, pathOrder };
       }
 
+      function getExploredGraphElements(data) {
+        const graphData = data.exploredGraph;
+        const nodeItems = Array.isArray(graphData?.nodes) ? graphData.nodes : [];
+        const edgeItems = Array.isArray(graphData?.edges) ? graphData.edges : [];
+
+        const nodes = nodeItems
+          .filter((node) => node && typeof node.id === 'string')
+          .map((node) => ({
+            data: {
+              id: node.id,
+              label: node.name || node.id,
+            },
+          }));
+
+        const edgeIds = new Set();
+        const edges = edgeItems
+          .map((edge, index) => {
+            const source = edge?.fromArtist?.id;
+            const target = edge?.toArtist?.id;
+            if (!source || !target) {
+              return null;
+            }
+            const label = edge?.track?.name || `Edge ${index + 1}`;
+            const key = `${source}__${target}__${label}`;
+            if (edgeIds.has(key)) {
+              return null;
+            }
+            edgeIds.add(key);
+            return {
+              data: {
+                id: `x${index}`,
+                source,
+                target,
+                label,
+              },
+            };
+          })
+          .filter(Boolean);
+
+        return { nodes, edges, pathOrder: [] };
+      }
+
       function getGraphPositions(nodeIds, pathOrder) {
         const pathIndexById = new Map(pathOrder.map((id, index) => [id, index]));
         const positions = {};
@@ -470,15 +538,38 @@
           return;
         }
 
-        const { nodes, edges, pathOrder } = getGraphElements(data);
+        const { nodes, edges, pathOrder } =
+          graphMode === 'explored' ? getExploredGraphElements(data) : getPathGraphElements(data);
         if (nodes.length === 0) {
           graphEl.innerHTML = '<div class="muted">No graph data to render.</div>';
           return;
         }
-        const positions = getGraphPositions(
-          nodes.map((node) => node.data.id),
-          pathOrder
-        );
+        const positions =
+          graphMode === 'path'
+            ? getGraphPositions(
+                nodes.map((node) => node.data.id),
+                pathOrder
+              )
+            : {};
+
+        const layout =
+          graphMode === 'explored'
+            ? {
+                name: 'cose',
+                animate: false,
+                fit: true,
+                padding: 30,
+                idealEdgeLength: 120,
+                nodeRepulsion: 100000,
+                edgeElasticity: 100,
+              }
+            : {
+                name: 'preset',
+                positions: (node) => positions[node.id()] ?? { x: 0, y: 110 },
+                animate: false,
+                fit: true,
+                padding: 30,
+              };
 
         graphEl.innerHTML = '';
         graph = window.cytoscape({
@@ -518,13 +609,7 @@
               },
             },
           ],
-          layout: {
-            name: 'preset',
-            positions: (node) => positions[node.id()] ?? { x: 0, y: 110 },
-            animate: false,
-            fit: true,
-            padding: 30,
-          },
+          layout,
         });
       }
 
@@ -557,12 +642,12 @@
             <h2 class="section-title">Search analytics</h2>
             <section class="analytics-grid">
               <article class="analytics-card">
-                <div class="analytics-label">Runtime</div>
-                <div class="analytics-value">${escapeHtml(metrics.runtimeMs)} ms</div>
+                <div class="analytics-label">Graph density</div>
+                <div class="analytics-value">${escapeHtml(metrics.graphDensity)}</div>
               </article>
               <article class="analytics-card">
-                <div class="analytics-label">Spotify API calls</div>
-                <div class="analytics-value">${escapeHtml(metrics.spotifyApiCalls)}</div>
+                <div class="analytics-label">Average node degree</div>
+                <div class="analytics-value">${escapeHtml(metrics.averageNodeDegree)}</div>
               </article>
               <article class="analytics-card">
                 <div class="analytics-label">Nodes explored</div>
@@ -602,11 +687,47 @@
           <h2 class="section-title">Path</h2>
           <div class="path-flow">${pathHtml}</div>
           <h2 class="section-title">Graph visualization</h2>
+          <div class="graph-mode-controls">
+            <button id="graphModePath" type="button" class="graph-mode-btn">Path graph</button>
+            <button id="graphModeExplored" type="button" class="graph-mode-btn">Full explored graph</button>
+          </div>
           <div id="graph" class="graph-canvas"></div>
           ${analyticsHtml}
           <h2 class="section-title">Collaborations</h2>
           <section class="collab-list">${collaborations}</section>
         `;
+        const graphModePathBtn = document.getElementById('graphModePath');
+        const graphModeExploredBtn = document.getElementById('graphModeExplored');
+        const hasExploredGraph = Array.isArray(data.exploredGraph?.nodes) && data.exploredGraph.nodes.length > 0;
+        if (!hasExploredGraph) {
+          graphMode = 'path';
+        }
+
+        const syncGraphModeButtons = () => {
+          if (!graphModePathBtn || !graphModeExploredBtn) {
+            return;
+          }
+          graphModePathBtn.classList.toggle('active', graphMode === 'path');
+          graphModeExploredBtn.classList.toggle('active', graphMode === 'explored');
+          graphModeExploredBtn.disabled = !hasExploredGraph;
+        };
+
+        if (graphModePathBtn && graphModeExploredBtn) {
+          graphModePathBtn.addEventListener('click', () => {
+            graphMode = 'path';
+            syncGraphModeButtons();
+            renderGraph(data);
+          });
+          graphModeExploredBtn.addEventListener('click', () => {
+            if (!hasExploredGraph) {
+              return;
+            }
+            graphMode = 'explored';
+            syncGraphModeButtons();
+            renderGraph(data);
+          });
+        }
+        syncGraphModeButtons();
         renderGraph(data);
       }
 

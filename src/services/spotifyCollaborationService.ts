@@ -75,10 +75,10 @@ export interface CollaborationPathEdge {
 }
 
 export interface SearchMetrics {
-  runtimeMs: number;
-  spotifyApiCalls: number;
   nodesExplored: number;
   edgesExplored: number;
+  graphDensity: number;
+  averageNodeDegree: number;
   frontierLayersExpanded: number;
   depthFromSource: number;
   depthFromTarget: number;
@@ -88,6 +88,11 @@ export interface CollaborationAnalytics {
   searchMetrics: SearchMetrics;
 }
 
+export interface ExploredGraph {
+  nodes: CollaborationPathNode[];
+  edges: CollaborationPathEdge[];
+}
+
 export interface CollaborationPathResult {
   source: CollaborationPathNode;
   target: CollaborationPathNode;
@@ -95,6 +100,7 @@ export interface CollaborationPathResult {
   path: CollaborationPathNode[];
   collaborations: CollaborationPathEdge[];
   analytics: CollaborationAnalytics;
+  exploredGraph: ExploredGraph;
 }
 
 export interface ArtistSuggestion {
@@ -102,7 +108,7 @@ export interface ArtistSuggestion {
   name: string;
 }
 
-type CollaborationPathCoreResult = Omit<CollaborationPathResult, 'analytics'>;
+type CollaborationPathCoreResult = Omit<CollaborationPathResult, 'analytics' | 'exploredGraph'>;
 
 interface ParentStep {
   previousArtistId: string;
@@ -389,8 +395,6 @@ function createUndirectedEdgeKey(artistA: string, artistB: string): string {
 }
 
 function buildAnalytics(params: {
-  startedAtMs: number;
-  telemetry: SearchTelemetry;
   visitedFromSource: Set<string>;
   visitedFromTarget: Set<string>;
   exploredEdgeKeys: Set<string>;
@@ -399,17 +403,70 @@ function buildAnalytics(params: {
   depthFromTarget: number;
 }): CollaborationAnalytics {
   const exploredArtistIds = new Set<string>([...params.visitedFromSource, ...params.visitedFromTarget]);
+  const nodesExplored = exploredArtistIds.size;
+  const edgesExplored = params.exploredEdgeKeys.size;
+  const graphDensity =
+    nodesExplored > 1 ? Number(((2 * edgesExplored) / (nodesExplored * (nodesExplored - 1))).toFixed(3)) : 0;
+  const averageNodeDegree = nodesExplored > 0 ? Number(((2 * edgesExplored) / nodesExplored).toFixed(3)) : 0;
 
   return {
     searchMetrics: {
-      runtimeMs: Date.now() - params.startedAtMs,
-      spotifyApiCalls: params.telemetry.spotifyApiCalls,
-      nodesExplored: exploredArtistIds.size,
-      edgesExplored: params.exploredEdgeKeys.size,
+      nodesExplored,
+      edgesExplored,
+      graphDensity,
+      averageNodeDegree,
       frontierLayersExpanded: params.frontierLayersExpanded,
       depthFromSource: params.depthFromSource,
       depthFromTarget: params.depthFromTarget,
     },
+  };
+}
+
+function buildExploredGraph(params: {
+  sourceArtist: SpotifyArtist;
+  targetArtist: SpotifyArtist;
+  visitedFromSource: Set<string>;
+  visitedFromTarget: Set<string>;
+  exploredEdgeByKey: Map<string, CollaborationEdge>;
+  artistNameById: Map<string, string>;
+}): ExploredGraph {
+  const nodeIds = new Set<string>([
+    params.sourceArtist.id,
+    params.targetArtist.id,
+    ...params.visitedFromSource,
+    ...params.visitedFromTarget,
+  ]);
+
+  for (const edge of params.exploredEdgeByKey.values()) {
+    nodeIds.add(edge.fromArtistId);
+    nodeIds.add(edge.toArtistId);
+  }
+
+  const nodes = Array.from(nodeIds)
+    .map((id) => ({
+      id,
+      name: params.artistNameById.get(id) ?? id,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  const edges = Array.from(params.exploredEdgeByKey.values()).map((edge) => ({
+    fromArtist: {
+      id: edge.fromArtistId,
+      name: params.artistNameById.get(edge.fromArtistId) ?? edge.fromArtistId,
+    },
+    toArtist: {
+      id: edge.toArtistId,
+      name: params.artistNameById.get(edge.toArtistId) ?? edge.toArtistId,
+    },
+    track: {
+      id: edge.trackId,
+      name: edge.trackName,
+    },
+  }));
+
+  return {
+    nodes,
+    edges,
   };
 }
 
@@ -492,10 +549,6 @@ export async function findCollaborationPath(
   targetArtistName: string,
   rawOptions?: Partial<CollaborationSearchOptions>
 ): Promise<CollaborationPathResult | null> {
-  const searchStartedAtMs = Date.now();
-  const telemetry: SearchTelemetry = {
-    spotifyApiCalls: 0,
-  };
   const sourceName = sourceArtistName.trim();
   const targetName = targetArtistName.trim();
 
@@ -504,9 +557,9 @@ export async function findCollaborationPath(
   }
 
   const options = sanitizeOptions(rawOptions);
-  const accessToken = await getSpotifyAccessToken(telemetry);
-  const sourceArtist = await searchArtistByName(sourceName, accessToken, telemetry);
-  const targetArtist = await searchArtistByName(targetName, accessToken, telemetry);
+  const accessToken = await getSpotifyAccessToken();
+  const sourceArtist = await searchArtistByName(sourceName, accessToken);
+  const targetArtist = await searchArtistByName(targetName, accessToken);
 
   const artistNameById = new Map<string, string>([
     [sourceArtist.id, sourceArtist.name],
@@ -514,7 +567,10 @@ export async function findCollaborationPath(
   ]);
 
   const exploredEdgeKeys = new Set<string>();
+  const exploredEdgeByKey = new Map<string, CollaborationEdge>();
   let frontierLayersExpanded = 0;
+  const visitedFromSource = new Set<string>([sourceArtist.id]);
+  const visitedFromTarget = new Set<string>([targetArtist.id]);
 
   if (sourceArtist.id === targetArtist.id) {
     return {
@@ -524,14 +580,20 @@ export async function findCollaborationPath(
       path: [{ id: sourceArtist.id, name: sourceArtist.name }],
       collaborations: [],
       analytics: buildAnalytics({
-        startedAtMs: searchStartedAtMs,
-        telemetry,
-        visitedFromSource: new Set<string>([sourceArtist.id]),
-        visitedFromTarget: new Set<string>([targetArtist.id]),
+        visitedFromSource,
+        visitedFromTarget,
         exploredEdgeKeys,
         frontierLayersExpanded,
         depthFromSource: 0,
         depthFromTarget: 0,
+      }),
+      exploredGraph: buildExploredGraph({
+        sourceArtist,
+        targetArtist,
+        visitedFromSource,
+        visitedFromTarget,
+        exploredEdgeByKey,
+        artistNameById,
       }),
     };
   }
@@ -542,15 +604,13 @@ export async function findCollaborationPath(
     if (cached) {
       return cached;
     }
-    const edges = await getCollaborationsForArtist(artistId, options, accessToken, artistNameById, telemetry);
+    const edges = await getCollaborationsForArtist(artistId, options, accessToken, artistNameById);
     cache.set(artistId, edges);
     return edges;
   };
 
   let frontierFromSource = new Set<string>([sourceArtist.id]);
   let frontierFromTarget = new Set<string>([targetArtist.id]);
-  const visitedFromSource = new Set<string>([sourceArtist.id]);
-  const visitedFromTarget = new Set<string>([targetArtist.id]);
   const parentsFromSource = new Map<string, ParentStep>();
   const parentsFromTarget = new Map<string, ParentStep>();
   let depthFromSource = 0;
@@ -568,7 +628,11 @@ export async function findCollaborationPath(
       for (const edge of neighbors) {
         const neighborId = edge.toArtistId;
         if (artistId !== neighborId) {
-          exploredEdgeKeys.add(createUndirectedEdgeKey(artistId, neighborId));
+          const edgeKey = createUndirectedEdgeKey(artistId, neighborId);
+          exploredEdgeKeys.add(edgeKey);
+          if (!exploredEdgeByKey.has(edgeKey)) {
+            exploredEdgeByKey.set(edgeKey, edge);
+          }
         }
         const currentVisited = expandFromSource ? visitedFromSource : visitedFromTarget;
         if (currentVisited.has(neighborId)) {
@@ -608,14 +672,20 @@ export async function findCollaborationPath(
           return {
             ...baseResult,
             analytics: buildAnalytics({
-              startedAtMs: searchStartedAtMs,
-              telemetry,
               visitedFromSource,
               visitedFromTarget,
               exploredEdgeKeys,
               frontierLayersExpanded,
               depthFromSource,
               depthFromTarget,
+            }),
+            exploredGraph: buildExploredGraph({
+              sourceArtist,
+              targetArtist,
+              visitedFromSource,
+              visitedFromTarget,
+              exploredEdgeByKey,
+              artistNameById,
             }),
           };
         }
