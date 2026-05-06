@@ -8,9 +8,9 @@ The web app also includes graph visualization and search analytics for the explo
 ![Screenshot 1 - Home page / initial UI](screenshots/01-home-page.png)
 
 ## 1. Prerequisites
-- Node.js (recommended: current LTS)
-- npm (comes with Node.js)
-- Internet connection (Spotify API is required)
+- Node.js
+- npm
+- Internet connection, Spotify API is required
 
 ## 2. Get Spotify API Credentials
 1. Go to Spotify for Developers: <https://developer.spotify.com/dashboard>
@@ -32,7 +32,6 @@ From the project root:
    ```
 3. Open `.env` and set your credentials:
    ```env
-   PORT=3001
    SPOTIFY_CLIENT_ID=your_client_id_here
    SPOTIFY_CLIENT_SECRET=your_client_secret_here
    ```
