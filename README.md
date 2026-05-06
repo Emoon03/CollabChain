@@ -1,41 +1,94 @@
-# Spotify Artist Graph API
+# CollabChain: Spotify Shortest Artist Path Finder
 
-Find collaboration connections between two artists using Spotify data.
+Find the shortest collaboration path between two artists using Spotify data and bidirectional BFS.
 
-## Setup
+## Overview
 
-1. Copy `.env.example` to `.env`.
-2. Fill in `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`.
-3. Install dependencies:
-   - `npm install`
+CollabChain explores artist connections through collaboration history. Search for any two artists and discover how many "degrees of collaboration" separate them, with interactive graph visualization and detailed search analytics.
 
-## Run
+## Quick Start
+
+### Prerequisites
+- Node.js 16+
+- Spotify Developer account
+
+### Setup
+
+1. Clone the repository and install dependencies:
+   ```bash
+   npm install
+   ```
+
+2. Copy `.env.example` to `.env` and fill in your Spotify credentials:
+   ```
+   SPOTIFY_CLIENT_ID=your_client_id
+   SPOTIFY_CLIENT_SECRET=your_client_secret
+   ```
+
+3. Run the development server:
+   ```bash
+   npm run dev
+   ```
+
+4. Open `http://localhost:3001` in your browser.
+
+## Usage
+
+1. **Search**: Enter two artist names in the search fields with autocomplete suggestions.
+2. **View Results**: See the shortest path connecting the artists.
+3. **Analyze**: Toggle between **Path graph** (shortest path only) and **Full explored graph** (all visited nodes/edges) to inspect the BFS exploration.
+4. **Metrics**: Review analytics including graph density, node degree, bidirectional search balance, and frontier expansion layers.
+
+## Building & Deployment
 
 - Development: `npm run dev`
-- Build: `npm run build`
-- Start built app: `npm start`
+- Production build: `npm run build`
+- Start production app: `npm start`
 
-## Web UI
+## API Endpoints
 
-- Open `http://localhost:3001` in your browser.
-- Enter source and target artist names (with dropdown suggestions), then click **Find connection**.
-- In graph visualization, switch between **Path graph** and **Full explored graph** to inspect BFS exploration.
-- Results now include graph analytics (explored nodes/edges, graph density, average node degree, bidirectional balance score, and BFS frontier layers expanded).
+### Health Check
+```
+GET /api/health
+```
 
-## Endpoints
+### Find Artist Connection
+```
+POST /api/music/connections
+Content-Type: application/json
 
-- `GET /api/health`
-- `POST /api/music/connections`
-- `GET /api/music/artists/search?q=<artist name>`
-
-Example request body:
-
-```json
 {
   "sourceArtist": "Taylor Swift",
   "targetArtist": "Bon Iver",
   "maxDepth": 6,
-  "maxAlbumsPerArtist": 30,
-  "maxTracksPerAlbum": 50
+  "maxAlbumsPerArtist": 15,
+  "maxTracksPerAlbum": 20
 }
 ```
+
+**Response includes:**
+- Shortest path (sequence of artists)
+- Explored subgraph (all visited nodes/edges)
+- Connection metadata
+- Search analytics (density, balance score, frontier layers)
+
+### Artist Search
+```
+GET /api/music/artists/search?q=<artist name>
+```
+
+Returns matching artists with Spotify data.
+
+## Features
+
+- **Bidirectional BFS**: Efficient pathfinding from both source and target simultaneously
+- **Interactive Graph Visualization**: Cytoscape.js rendering with layout toggle
+- **Search Analytics**: Metrics on graph structure and search behavior
+- **Real-time Artist Autocomplete**: Type to search Spotify's artist database
+- **Customizable Search Limits**: Control search depth and data fetched per artist
+
+## Architecture
+
+- **Backend**: Express.js + TypeScript with Spotify API integration
+- **Frontend**: Vanilla JavaScript with Cytoscape.js for graph visualization
+- **Algorithm**: Bidirectional BFS with early termination on path discovery

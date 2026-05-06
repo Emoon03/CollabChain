@@ -14,4 +14,4 @@ Work Breakdown:
 - Both: BFS testing/tuning, output formatting, debugging, and end-to-end validation of search results.
 
 AI Usage:
-- AI was used for ideas for analytics and metrics implementation, debugging, and assistance with Spotify API rate limits.
+- AI was used for debugging assistance, brainstorming graph analytics metrics, and guidance on Spotify API handling/rate limiting. All core implementation logic, graph construction, BFS traversal, visualization integration, and final code understanding were completed and verified by the project team.
