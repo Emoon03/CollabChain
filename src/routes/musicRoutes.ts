@@ -10,9 +10,9 @@ interface FindConnectionRequestBody {
 }
 
 const router = Router();
-const CONNECTION_SEARCH_TIMEOUT_MS = 30_000;
+const CONNECTION_SEARCH_TIMEOUT_MS = 120_000;
 const CONNECTION_SEARCH_TIMEOUT_MESSAGE =
-  'Search timed out. Try reducing depth/albums/tracks or use a different artist pair.';
+  'Search timed out after 2 minutes. Try reducing depth/albums/tracks or use a different artist pair.';
 
 router.get('/artists/search', async (req: Request, res: Response) => {
   try {

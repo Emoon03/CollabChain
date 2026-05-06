@@ -46,7 +46,8 @@
         gap: 0.35rem;
         font-size: 0.95rem;
       }
-      input {
+      input,
+      select {
         width: 100%;
         padding: 0.6rem 0.75rem;
         border-radius: 8px;
@@ -55,7 +56,8 @@
         color: #f9fafb;
         box-sizing: border-box;
       }
-      input:focus {
+      input:focus,
+      select:focus {
         outline: none;
         border-color: #10b981;
       }
@@ -153,6 +155,14 @@
         border-radius: 10px;
         padding: 0.65rem;
       }
+      .graph-canvas {
+        margin-top: 0.35rem;
+        width: 100%;
+        min-height: 420px;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        background: #020617;
+      }
       .track-name {
         color: #86efac;
         font-weight: 700;
@@ -239,36 +249,44 @@
 
           <details>
             <summary>Advanced options</summary>
+            <label for="searchPreset" style="margin-top: 0.75rem">
+              Search mode
+              <select id="searchPreset" name="searchPreset">
+                <option value="fast">Fast</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="deep">Deep</option>
+              </select>
+            </label>
             <div class="row" style="margin-top: 0.75rem">
               <label for="maxDepth">
                 Max depth
-                <input id="maxDepth" name="maxDepth" type="number" min="1" max="8" value="2" />
+                <input id="maxDepth" name="maxDepth" type="number" min="1" max="8" value="3" />
               </label>
               <label for="maxAlbumsPerArtist">
                 Max albums per artist
                 <input
                   id="maxAlbumsPerArtist"
-                  name="maxAlbumsPerArtist"
-                  type="number"
-                  min="1"
-                  max="100"
-                  value="5"
-                />
-              </label>
-            </div>
+                   name="maxAlbumsPerArtist"
+                   type="number"
+                   min="1"
+                   max="100"
+                   value="8"
+                 />
+               </label>
+             </div>
             <div class="row" style="margin-top: 0.75rem">
               <label for="maxTracksPerAlbum">
                 Max tracks per album
                 <input
                   id="maxTracksPerAlbum"
-                  name="maxTracksPerAlbum"
-                  type="number"
-                  min="1"
-                  max="50"
-                  value="8"
-                />
-              </label>
-            </div>
+                   name="maxTracksPerAlbum"
+                   type="number"
+                   min="1"
+                   max="50"
+                   value="12"
+                 />
+               </label>
+             </div>
           </details>
 
           <button id="submit-btn" type="submit">Find connection</button>
@@ -279,6 +297,7 @@
       </section>
     </main>
 
+    <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
     <script>
       const form = document.getElementById('connection-form');
       const resultEl = document.getElementById('result');
@@ -288,8 +307,28 @@
       const targetArtistInput = document.getElementById('targetArtist');
       const sourceArtistDropdown = document.getElementById('sourceArtistDropdown');
       const targetArtistDropdown = document.getElementById('targetArtistDropdown');
-      const SEARCH_TIMEOUT_MS = 30000;
+      const searchPresetSelect = document.getElementById('searchPreset');
+      const maxDepthInput = document.getElementById('maxDepth');
+      const maxAlbumsPerArtistInput = document.getElementById('maxAlbumsPerArtist');
+      const maxTracksPerAlbumInput = document.getElementById('maxTracksPerAlbum');
+      const SEARCH_TIMEOUT_MS = 120000;
       let activeConnectionSearchController = null;
+      let graph = null;
+      const SEARCH_PRESETS = {
+        fast: { maxDepth: 2, maxAlbumsPerArtist: 5, maxTracksPerAlbum: 8 },
+        balanced: { maxDepth: 3, maxAlbumsPerArtist: 8, maxTracksPerAlbum: 12 },
+        deep: { maxDepth: 4, maxAlbumsPerArtist: 12, maxTracksPerAlbum: 20 },
+      };
+
+      function applySearchPreset(presetKey) {
+        const preset = SEARCH_PRESETS[presetKey];
+        if (!preset || !maxDepthInput || !maxAlbumsPerArtistInput || !maxTracksPerAlbumInput) {
+          return;
+        }
+        maxDepthInput.value = String(preset.maxDepth);
+        maxAlbumsPerArtistInput.value = String(preset.maxAlbumsPerArtist);
+        maxTracksPerAlbumInput.value = String(preset.maxTracksPerAlbum);
+      }
 
       function escapeHtml(value) {
         return String(value)
@@ -301,7 +340,170 @@
       }
 
       function renderEmptyState(message) {
+        if (graph) {
+          graph.destroy();
+          graph = null;
+        }
         resultEl.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
+      }
+
+      function getGraphElements(data) {
+        const pathItems = Array.isArray(data.path) ? data.path : [];
+        const collabItems = Array.isArray(data.collaborations) ? data.collaborations : [];
+        const nodesById = new Map();
+        const pathOrder = [];
+
+        pathItems.forEach((node) => {
+          if (node && typeof node.id === 'string') {
+            nodesById.set(node.id, node.name || node.id);
+            pathOrder.push(node.id);
+          }
+        });
+
+        collabItems.forEach((edge) => {
+          if (edge?.fromArtist?.id) {
+            nodesById.set(edge.fromArtist.id, edge.fromArtist.name || edge.fromArtist.id);
+          }
+          if (edge?.toArtist?.id) {
+            nodesById.set(edge.toArtist.id, edge.toArtist.name || edge.toArtist.id);
+          }
+        });
+
+        const nodes = Array.from(nodesById.entries()).map(([id, label]) => ({
+          data: { id, label },
+        }));
+
+        const edgeIds = new Set();
+        const edges = collabItems
+          .map((edge, index) => {
+            const source = edge?.fromArtist?.id;
+            const target = edge?.toArtist?.id;
+            if (!source || !target) {
+              return null;
+            }
+
+            const name = edge?.track?.name || `Step ${index + 1}`;
+            const edgeId = `${source}__${target}__${name}`;
+            if (edgeIds.has(edgeId)) {
+              return null;
+            }
+            edgeIds.add(edgeId);
+
+            return {
+              data: {
+                id: `e${index}`,
+                source,
+                target,
+                label: name,
+              },
+            };
+          })
+          .filter(Boolean);
+
+        return { nodes, edges, pathOrder };
+      }
+
+      function getGraphPositions(nodeIds, pathOrder) {
+        const pathIndexById = new Map(pathOrder.map((id, index) => [id, index]));
+        const positions = {};
+        const horizontalSpacing = 220;
+        const topRowY = 110;
+        const extraRowY = 250;
+        const extras = [];
+
+        nodeIds.forEach((id) => {
+          if (!pathIndexById.has(id)) {
+            extras.push(id);
+            return;
+          }
+          positions[id] = {
+            x: pathIndexById.get(id) * horizontalSpacing,
+            y: topRowY,
+          };
+        });
+
+        extras.forEach((id, index) => {
+          positions[id] = {
+            x: index * horizontalSpacing,
+            y: extraRowY,
+          };
+        });
+
+        return positions;
+      }
+
+      function renderGraph(data) {
+        const graphEl = document.getElementById('graph');
+        if (!graphEl) {
+          return;
+        }
+
+        if (graph) {
+          graph.destroy();
+          graph = null;
+        }
+
+        if (typeof window.cytoscape !== 'function') {
+          graphEl.innerHTML = '<div class="muted">Graph library failed to load.</div>';
+          return;
+        }
+
+        const { nodes, edges, pathOrder } = getGraphElements(data);
+        if (nodes.length === 0) {
+          graphEl.innerHTML = '<div class="muted">No graph data to render.</div>';
+          return;
+        }
+        const positions = getGraphPositions(
+          nodes.map((node) => node.data.id),
+          pathOrder
+        );
+
+        graphEl.innerHTML = '';
+        graph = window.cytoscape({
+          container: graphEl,
+          elements: [...nodes, ...edges],
+          style: [
+            {
+              selector: 'node',
+              style: {
+                'background-color': '#10b981',
+                color: '#ecfeff',
+                label: 'data(label)',
+                'font-size': 14,
+                'text-outline-color': '#065f46',
+                'text-outline-width': 3,
+                'text-wrap': 'wrap',
+                'text-max-width': 180,
+                width: 42,
+                height: 42,
+              },
+            },
+            {
+              selector: 'edge',
+              style: {
+                width: 2.8,
+                'line-color': '#38bdf8',
+                'target-arrow-shape': 'triangle',
+                'target-arrow-color': '#38bdf8',
+                'curve-style': 'bezier',
+                label: 'data(label)',
+                color: '#cbd5e1',
+                'font-size': 11,
+                'text-rotation': 'none',
+                'text-margin-y': -14,
+                'text-wrap': 'wrap',
+                'text-max-width': 220,
+              },
+            },
+          ],
+          layout: {
+            name: 'preset',
+            positions: (node) => positions[node.id()] ?? { x: 0, y: 110 },
+            animate: false,
+            fit: true,
+            padding: 30,
+          },
+        });
       }
 
       function renderResult(data) {
@@ -345,9 +547,12 @@
           </section>
           <h2 class="section-title">Path</h2>
           <div class="path-flow">${pathHtml}</div>
+          <h2 class="section-title">Graph visualization</h2>
+          <div id="graph" class="graph-canvas"></div>
           <h2 class="section-title">Collaborations</h2>
           <section class="collab-list">${collaborations}</section>
         `;
+        renderGraph(data);
       }
 
       renderEmptyState('Submit a request to see the result.');
@@ -477,6 +682,12 @@
 
       bindArtistSuggestions(sourceArtistInput, sourceArtistDropdown);
       bindArtistSuggestions(targetArtistInput, targetArtistDropdown);
+      if (searchPresetSelect) {
+        searchPresetSelect.addEventListener('change', () => {
+          applySearchPreset(searchPresetSelect.value);
+        });
+        applySearchPreset(searchPresetSelect.value);
+      }
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -519,7 +730,9 @@
         } catch (error) {
           setStatus('Request failed.', 'error');
           if (error instanceof DOMException && error.name === 'AbortError') {
-            renderEmptyState('Search took too long. Try smaller limits (lower depth/albums/tracks) or a different artist pair.');
+              renderEmptyState(
+                'Search took too long (over 2 minutes). Try smaller limits (lower depth/albums/tracks) or a different artist pair.'
+              );
           } else {
             renderEmptyState(error instanceof Error ? error.message : 'Unknown error while contacting the API.');
           }
