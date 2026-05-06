@@ -79,7 +79,7 @@ export interface SearchMetrics {
   edgesExplored: number;
   graphDensity: number;
   averageNodeDegree: number;
-  averageClusteringCoefficient: number;
+  bidirectionalBalanceScore: number;
   frontierLayersExpanded: number;
 }
 
@@ -393,56 +393,12 @@ function createUndirectedEdgeKey(artistA: string, artistB: string): string {
   return artistA < artistB ? `${artistA}::${artistB}` : `${artistB}::${artistA}`;
 }
 
-function calculateAverageClusteringCoefficient(nodeIds: Set<string>, exploredEdgeKeys: Set<string>): number {
-  const adjacencyByNode = new Map<string, Set<string>>();
-  for (const nodeId of nodeIds) {
-    adjacencyByNode.set(nodeId, new Set<string>());
+function calculateBidirectionalBalanceScore(depthFromSource: number, depthFromTarget: number): number {
+  const totalDepth = depthFromSource + depthFromTarget;
+  if (totalDepth <= 0) {
+    return 1;
   }
-
-  for (const edgeKey of exploredEdgeKeys) {
-    const [left, right] = edgeKey.split('::');
-    if (!left || !right) {
-      continue;
-    }
-    if (!adjacencyByNode.has(left)) {
-      adjacencyByNode.set(left, new Set<string>());
-    }
-    if (!adjacencyByNode.has(right)) {
-      adjacencyByNode.set(right, new Set<string>());
-    }
-    adjacencyByNode.get(left)?.add(right);
-    adjacencyByNode.get(right)?.add(left);
-  }
-
-  const allNodes = Array.from(adjacencyByNode.keys());
-  if (allNodes.length === 0) {
-    return 0;
-  }
-
-  let sumLocalCoefficients = 0;
-  for (const nodeId of allNodes) {
-    const neighbors = Array.from(adjacencyByNode.get(nodeId) ?? []);
-    const neighborCount = neighbors.length;
-    if (neighborCount < 2) {
-      continue;
-    }
-
-    let connectedNeighborPairs = 0;
-    for (let i = 0; i < neighbors.length - 1; i += 1) {
-      const neighborA = neighbors[i];
-      const neighborsOfA = adjacencyByNode.get(neighborA) ?? new Set<string>();
-      for (let j = i + 1; j < neighbors.length; j += 1) {
-        if (neighborsOfA.has(neighbors[j])) {
-          connectedNeighborPairs += 1;
-        }
-      }
-    }
-
-    const possibleNeighborPairs = (neighborCount * (neighborCount - 1)) / 2;
-    sumLocalCoefficients += connectedNeighborPairs / possibleNeighborPairs;
-  }
-
-  return Number((sumLocalCoefficients / allNodes.length).toFixed(3));
+  return Number((1 - Math.abs(depthFromSource - depthFromTarget) / totalDepth).toFixed(3));
 }
 
 function buildAnalytics(params: {
@@ -450,6 +406,8 @@ function buildAnalytics(params: {
   visitedFromTarget: Set<string>;
   exploredEdgeKeys: Set<string>;
   frontierLayersExpanded: number;
+  depthFromSource: number;
+  depthFromTarget: number;
 }): CollaborationAnalytics {
   const exploredArtistIds = new Set<string>([...params.visitedFromSource, ...params.visitedFromTarget]);
   const nodesExplored = exploredArtistIds.size;
@@ -457,7 +415,7 @@ function buildAnalytics(params: {
   const graphDensity =
     nodesExplored > 1 ? Number(((2 * edgesExplored) / (nodesExplored * (nodesExplored - 1))).toFixed(3)) : 0;
   const averageNodeDegree = nodesExplored > 0 ? Number(((2 * edgesExplored) / nodesExplored).toFixed(3)) : 0;
-  const averageClusteringCoefficient = calculateAverageClusteringCoefficient(exploredArtistIds, params.exploredEdgeKeys);
+  const bidirectionalBalanceScore = calculateBidirectionalBalanceScore(params.depthFromSource, params.depthFromTarget);
 
   return {
     searchMetrics: {
@@ -465,7 +423,7 @@ function buildAnalytics(params: {
       edgesExplored,
       graphDensity,
       averageNodeDegree,
-      averageClusteringCoefficient,
+      bidirectionalBalanceScore,
       frontierLayersExpanded: params.frontierLayersExpanded,
     },
   };
@@ -633,6 +591,8 @@ export async function findCollaborationPath(
         visitedFromTarget,
         exploredEdgeKeys,
         frontierLayersExpanded,
+        depthFromSource: 0,
+        depthFromTarget: 0,
       }),
       exploredGraph: buildExploredGraph({
         sourceArtist,
@@ -723,6 +683,8 @@ export async function findCollaborationPath(
               visitedFromTarget,
               exploredEdgeKeys,
               frontierLayersExpanded,
+              depthFromSource,
+              depthFromTarget,
             }),
             exploredGraph: buildExploredGraph({
               sourceArtist,

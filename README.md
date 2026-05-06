@@ -20,7 +20,7 @@ Find collaboration connections between two artists using Spotify data.
 - Open `http://localhost:3001` in your browser.
 - Enter source and target artist names (with dropdown suggestions), then click **Find connection**.
 - In graph visualization, switch between **Path graph** and **Full explored graph** to inspect BFS exploration.
-- Results now include graph analytics (explored nodes/edges, graph density, average node degree, average clustering coefficient, and BFS frontier layers expanded).
+- Results now include graph analytics (explored nodes/edges, graph density, average node degree, bidirectional balance score, and BFS frontier layers expanded).
 
 ## Endpoints
 
