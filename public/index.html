@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Spotify Artist Graph</title>
+    <title>Spotify Shortest Artist Path Finder</title>
     <style>
       :root {
         color-scheme: dark;
@@ -272,8 +272,8 @@
   <body>
     <main class="container">
       <section class="card">
-        <h1>Spotify Artist Graph</h1>
-        <p>Type two artists to find a collaboration path between them.</p>
+        <h1>Spotify Shortest Artist Path Finder</h1>
+        <p>Type two artists to find the shortest collaboration path between them.</p>
 
         <form id="connection-form">
           <div class="row">
@@ -328,7 +328,7 @@
               </div>
           </details>
 
-          <button id="submit-btn" type="submit">Find connection</button>
+          <button id="submit-btn" type="submit">Find shortest path</button>
           <div id="status" class="status" aria-live="polite"></div>
         </form>
 
@@ -704,7 +704,7 @@
         renderGraph(data);
       }
 
-      renderEmptyState('Submit a request to see the result.');
+      renderEmptyState('Submit a request to see the shortest path result.');
 
       function setStatus(message, type) {
         statusEl.textContent = message;
